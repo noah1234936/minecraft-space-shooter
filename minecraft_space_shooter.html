@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Steve Space Shooter</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(180deg, #000428, #004e92);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+        
+        #gameContainer {
+            position: relative;
+            border: 4px solid #4CAF50;
+            border-radius: 15px;
+            box-shadow: 0 0 50px rgba(76, 175, 80, 0.6);
+            background: linear-gradient(180deg, #001122, #003366);
+        }
+        
+        #gameCanvas {
+            display: block;
+            border-radius: 11px;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            color: #4CAF50;
+            font-weight: bold;
+            text-shadow: 2px 2px 6px rgba(0,0,0,0.9);
+            z-index: 10;
+            font-size: 16px;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            color: #4CAF50;
+            font-size: 12px;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.9);
+            z-index: 10;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: #4CAF50;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            font-size: 20px;
+            border: 3px solid #4CAF50;
+            display: none;
+            z-index: 20;
+        }
+        
+        .pixel-text {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            text-shadow: 2px 2px 0px rgba(0,0,0,0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="ui" class="pixel-text">
+            <div>💎 Score: <span id="score">0</span></div>
+            <div>🚀 Spaceships Destroyed: <span id="kills">0</span></div>
+            <div>❤️ Lives: <span id="lives">3</span></div>
+            <div>⚡ Level: <span id="level">1</span></div>
+        </div>
+        
+        <div id="controls" class="pixel-text">
+            A/D or ←/→: Move Steve | SPACE: Shoot | Destroy all spaceships!
+        </div>
+        
+        <div id="gameOver" class="pixel-text">
+            <div id="gameOverText">GAME OVER!</div>
+            <div style="margin: 15px 0; font-size: 16px;">
+                Final Score: <span id="finalScore">0</span><br>
+                Spaceships Destroyed: <span id="finalKills">0</span>
+            </div>
+            <button onclick="restartGame()" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-size: 16px; cursor: pointer;">
+                Play Again
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game state
+        const game = {
+            steve: {
+                x: canvas.width / 2,
+                y: canvas.height - 60,
+                width: 40,
+                height: 60,
+                speed: 8,
+                lastShot: 0,
+                shotCooldown: 200
+            },
+            bullets: [],
+            spaceships: [],
+            particles: [],
+            stars: [],
+            keys: {},
+            score: 0,
+            kills: 0,
+            lives: 3,
+            level: 1,
+            gameTime: 0,
+            spaceshipSpawnRate: 90,
+            isGameOver: false
+        };
+        
+        // Initialize stars background
+        for (let i = 0; i < 100; i++) {
+            game.stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                speed: Math.random() * 2 + 0.5,
+                size: Math.random() * 2 + 1
+            });
+        }
+        
+        // Input handling
+        window.addEventListener('keydown', (e) => {
+            game.keys[e.key.toLowerCase()] = true;
+            
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault();
+                shootBullet();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            game.keys[e.key.toLowerCase()] = false;
+        });
+        
+        // Game classes
+        class Bullet {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = 6;
+                this.height = 12;
+                this.speed = 10;
+                this.color = '#00FFFF';
+            }
+            
+            update() {
+                this.y -= this.speed;
+                return this.y > -this.height;
+            }
+            
+            draw() {
+                // Draw pixelated bullet
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(this.x + 1, this.y + 1, this.width - 2, this.height - 2);
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x + 2, this.y + 2, this.width - 4, this.height - 4);
+            }
+        }
+        
+        class Spaceship {
+            constructor() {
+                this.x = Math.random() * (canvas.width - 60);
+                this.y = -60;
+                this.width = 60;
+                this.height = 40;
+                this.speed = Math.random() * 3 + 2;
+                this.health = 1;
+                this.type = Math.floor(Math.random() * 3); // Different spaceship types
+                this.shootTimer = Math.random() * 120 + 60;
+            }
+            
+            update() {
+                this.y += this.speed;
+                this.shootTimer--;
+                
+                // Occasional shooting
+                if (this.shootTimer <= 0 && Math.random() < 0.02) {
+                    this.shoot();
+                    this.shootTimer = Math.random() * 120 + 60;
+                }
+                
+                return this.y < canvas.height + this.height;
+            }
+            
+            shoot() {
+                // Enemy bullets (simple red squares)
+                game.bullets.push({
+                    x: this.x + this.width / 2,
+                    y: this.y + this.height,
+                    width: 8,
+                    height: 8,
+                    speed: -6,
+                    isEnemyBullet: true,
+                    color: '#FF0000'
+                });
+            }
+            
+            draw() {
+                ctx.save();
+                ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+                
+                // Different spaceship designs
+                switch (this.type) {
+                    case 0: // Classic UFO
+                        this.drawUFO();
+                        break;
+                    case 1: // Angular Fighter
+                        this.drawFighter();
+                        break;
+                    case 2: // Round Pod
+                        this.drawPod();
+                        break;
+                }
+                
+                ctx.restore();
+            }
+            
+            drawUFO() {
+                // Main body (silver/gray)
+                ctx.fillStyle = '#C0C0C0';
+                ctx.fillRect(-25, -8, 50, 16);
+                ctx.fillStyle = '#808080';
+                ctx.fillRect(-20, -6, 40, 12);
+                
+                // Dome
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(-15, -12, 30, 8);
+                ctx.fillStyle = '#4682B4';
+                ctx.fillRect(-12, -10, 24, 4);
+                
+                // Lights
+                ctx.fillStyle = '#00FF00';
+                ctx.fillRect(-20, 0, 4, 4);
+                ctx.fillRect(-5, 0, 4, 4);
+                ctx.fillRect(12, 0, 4, 4);
+            }
+            
+            drawFighter() {
+                // Main body (dark metal)
+                ctx.fillStyle = '#2F4F4F';
+                ctx.fillRect(-20, -6, 40, 12);
+                
+                // Wings
+                ctx.fillStyle = '#696969';
+                ctx.fillRect(-30, -2, 10, 4);
+                ctx.fillRect(20, -2, 10, 4);
+                
+                // Cockpit
+                ctx.fillStyle = '#FF4500';
+                ctx.fillRect(-8, -8, 16, 6);
+                
+                // Engines
+                ctx.fillStyle = '#FF6600';
+                ctx.fillRect(-25, 2, 6, 4);
+                ctx.fillRect(19, 2, 6, 4);
+            }
+            
+            drawPod() {
+                // Round body
+                ctx.fillStyle = '#9370DB';
+                ctx.fillRect(-18, -12, 36, 24);
+                ctx.fillStyle = '#8A2BE2';
+                ctx.fillRect(-15, -9, 30, 18);
+                
+                // Core
+                ctx.fillStyle = '#FF1493';
+                ctx.fillRect(-8, -6, 16, 12);
+                
+                // Spikes
+                ctx.fillStyle = '#4B0082';
+                ctx.fillRect(-22, -4, 4, 8);
+                ctx.fillRect(18, -4, 4, 8);
+                ctx.fillRect(-4, -16, 8, 4);
+            }
+        }
+        
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 8;
+                this.vy = (Math.random() - 0.5) * 8;
+                this.life = 60;
+                this.maxLife = 60;
+                this.color = color;
+                this.size = Math.random() * 4 + 2;
+            }
+            
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+                this.life--;
+                
+                return this.life > 0;
+            }
+            
+            draw() {
+                ctx.globalAlpha = this.life / this.maxLife;
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - this.size/2, this.y - this.size/2, this.size, this.size);
+                ctx.globalAlpha = 1;
+            }
+        }
+        
+        // Game functions
+        function shootBullet() {
+            const now = Date.now();
+            if (now - game.steve.lastShot > game.steve.shotCooldown) {
+                game.bullets.push(new Bullet(
+                    game.steve.x + game.steve.width / 2 - 3,
+                    game.steve.y
+                ));
+                game.steve.lastShot = now;
+            }
+        }
+        
+        function spawnSpaceship() {
+            if (Math.random() < 0.02 + (game.level * 0.005)) {
+                game.spaceships.push(new Spaceship());
+            }
+        }
+        
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                game.particles.push(new Particle(x, y, color));
+            }
+        }
+        
+        function checkCollisions() {
+            // Bullets vs Spaceships
+            for (let i = game.bullets.length - 1; i >= 0; i--) {
+                const bullet = game.bullets[i];
+                if (bullet.isEnemyBullet) continue;
+                
+                for (let j = game.spaceships.length - 1; j >= 0; j--) {
+                    const spaceship = game.spaceships[j];
+                    
+                    if (bullet.x < spaceship.x + spaceship.width &&
+                        bullet.x + bullet.width > spaceship.x &&
+                        bullet.y < spaceship.y + spaceship.height &&
+                        bullet.y + bullet.height > spaceship.y) {
+                        
+                        // Hit!
+                        createExplosion(spaceship.x + spaceship.width/2, spaceship.y + spaceship.height/2, '#FFD700');
+                        game.spaceships.splice(j, 1);
+                        game.bullets.splice(i, 1);
+                        game.score += 100 * game.level;
+                        game.kills++;
+                        
+                        // Level up every 10 kills
+                        if (game.kills % 10 === 0) {
+                            game.level++;
+                            game.steve.shotCooldown = Math.max(50, game.steve.shotCooldown - 10);
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            // Enemy bullets vs Steve
+            for (let i = game.bullets.length - 1; i >= 0; i--) {
+                const bullet = game.bullets[i];
+                if (!bullet.isEnemyBullet) continue;
+                
+                if (bullet.x < game.steve.x + game.steve.width &&
+                    bullet.x + bullet.width > game.steve.x &&
+                    bullet.y < game.steve.y + game.steve.height &&
+                    bullet.y + bullet.height > game.steve.y) {
+                    
+                    // Steve hit!
+                    createExplosion(game.steve.x + game.steve.width/2, game.steve.y + game.steve.height/2, '#FF4500');
+                    game.bullets.splice(i, 1);
+                    game.lives--;
+                    
+                    if (game.lives <= 0) {
+                        gameOver();
+                    }
+                }
+            }
+            
+            // Spaceships vs Steve (collision)
+            for (let i = game.spaceships.length - 1; i >= 0; i--) {
+                const spaceship = game.spaceships[i];
+                
+                if (spaceship.x < game.steve.x + game.steve.width &&
+                    spaceship.x + spaceship.width > game.steve.x &&
+                    spaceship.y < game.steve.y + game.steve.height &&
+                    spaceship.y + spaceship.height > game.steve.y) {
+                    
+                    // Direct collision!
+                    createExplosion(spaceship.x + spaceship.width/2, spaceship.y + spaceship.height/2, '#FF0000');
+                    game.spaceships.splice(i, 1);
+                    game.lives--;
+                    
+                    if (game.lives <= 0) {
+                        gameOver();
+                    }
+                }
+            }
+        }
+        
+        function gameOver() {
+            game.isGameOver = true;
+            document.getElementById('finalScore').textContent = game.score;
+            document.getElementById('finalKills').textContent = game.kills;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function restartGame() {
+            // Reset game state
+            game.steve.x = canvas.width / 2;
+            game.bullets = [];
+            game.spaceships = [];
+            game.particles = [];
+            game.score = 0;
+            game.kills = 0;
+            game.lives = 3;
+            game.level = 1;
+            game.gameTime = 0;
+            game.isGameOver = false;
+            game.steve.shotCooldown = 200;
+            
+            document.getElementById('gameOver').style.display = 'none';
+        }
+        
+        function updateGame() {
+            if (game.isGameOver) return;
+            
+            // Steve movement
+            if (game.keys['a'] || game.keys['arrowleft']) {
+                game.steve.x = Math.max(0, game.steve.x - game.steve.speed);
+            }
+            if (game.keys['d'] || game.keys['arrowright']) {
+                game.steve.x = Math.min(canvas.width - game.steve.width, game.steve.x + game.steve.speed);
+            }
+            
+            // Continuous shooting when holding space
+            if (game.keys[' ']) {
+                shootBullet();
+            }
+            
+            // Update bullets
+            for (let i = game.bullets.length - 1; i >= 0; i--) {
+                const bullet = game.bullets[i];
+                
+                if (bullet.isEnemyBullet) {
+                    bullet.y -= bullet.speed; // Enemy bullets go down
+                    if (bullet.y > canvas.height + bullet.height) {
+                        game.bullets.splice(i, 1);
+                    }
+                } else {
+                    if (!bullet.update()) {
+                        game.bullets.splice(i, 1);
+                    }
+                }
+            }
+            
+            // Update spaceships
+            for (let i = game.spaceships.length - 1; i >= 0; i--) {
+                if (!game.spaceships[i].update()) {
+                    game.spaceships.splice(i, 1);
+                }
+            }
+            
+            // Update particles
+            for (let i = game.particles.length - 1; i >= 0; i--) {
+                if (!game.particles[i].update()) {
+                    game.particles.splice(i, 1);
+                }
+            }
+            
+            // Update stars
+            game.stars.forEach(star => {
+                star.y += star.speed;
+                if (star.y > canvas.height) {
+                    star.y = -star.size;
+                    star.x = Math.random() * canvas.width;
+                }
+            });
+            
+            // Spawn spaceships
+            spawnSpaceship();
+            
+            // Check collisions
+            checkCollisions();
+            
+            game.gameTime++;
+        }
+        
+        function render() {
+            // Clear canvas with space background
+            ctx.fillStyle = '#000011';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw stars
+            ctx.fillStyle = '#FFFFFF';
+            game.stars.forEach(star => {
+                ctx.fillRect(star.x, star.y, star.size, star.size);
+            });
+            
+            // Draw Steve (pixelated Minecraft style)
+            ctx.save();
+            ctx.translate(game.steve.x, game.steve.y);
+            
+            // Steve's body parts
+            // Head
+            ctx.fillStyle = '#FDBCB4'; // Skin color
+            ctx.fillRect(8, 0, 24, 24);
+            
+            // Hair
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(8, 0, 24, 8);
+            
+            // Eyes
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(12, 8, 4, 4);
+            ctx.fillRect(20, 8, 4, 4);
+            
+            // Nose
+            ctx.fillStyle = '#F4A460';
+            ctx.fillRect(16, 12, 4, 4);
+            
+            // Body (blue shirt)
+            ctx.fillStyle = '#4169E1';
+            ctx.fillRect(8, 24, 24, 20);
+            
+            // Arms
+            ctx.fillStyle = '#FDBCB4';
+            ctx.fillRect(0, 24, 8, 16);
+            ctx.fillRect(32, 24, 8, 16);
+            
+            // Pants
+            ctx.fillStyle = '#2F4F4F';
+            ctx.fillRect(8, 44, 24, 16);
+            
+            // Legs
+            ctx.fillStyle = '#2F4F4F';
+            ctx.fillRect(8, 60, 8, 12);
+            ctx.fillRect(24, 60, 8, 12);
+            
+            // Add some Minecraft-style pixels for detail
+            ctx.fillStyle = '#1E90FF';
+            ctx.fillRect(12, 28, 4, 4);
+            ctx.fillRect(20, 28, 4, 4);
+            
+            ctx.restore();
+            
+            // Draw bullets
+            game.bullets.forEach(bullet => {
+                if (bullet.isEnemyBullet) {
+                    ctx.fillStyle = bullet.color;
+                    ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+                } else {
+                    bullet.draw();
+                }
+            });
+            
+            // Draw spaceships
+            game.spaceships.forEach(spaceship => spaceship.draw());
+            
+            // Draw particles
+            game.particles.forEach(particle => particle.draw());
+            
+            // Update UI
+            document.getElementById('score').textContent = game.score;
+            document.getElementById('kills').textContent = game.kills;
+            document.getElementById('lives').textContent = game.lives;
+            document.getElementById('level').textContent = game.level;
+        }
+        
+        function gameLoop() {
+            updateGame();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
